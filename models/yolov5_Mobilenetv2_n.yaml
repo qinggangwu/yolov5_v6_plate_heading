@@ -1,0 +1,55 @@
+# YOLOv5 🚀 by Ultralytics, GPL-3.0 license
+
+# Parameters
+nc: 80  # number of classes
+depth_multiple: 1.0  # model depth multiple
+width_multiple: 1.0  # layer channel multiple
+anchors:
+  - [10,13, 16,30, 33,23]  # P3/8
+  - [30,61, 62,45, 59,119]  # P4/16
+  - [116,90, 156,198, 373,326]  # P5/32
+
+# Mobilenetv3Small backbone
+# MobileNetV3_Block in_ch, [out_ch, hid_ch, k_s, stride, SE, HardSwish]
+backbone:
+  # [from, number, module, args]
+  [[-1, 1, RepVGGBlock, [8, 3, 2]],         # 0-p1/2
+   [-1, 1, MobileNetV2_Block, [16, 1, 1]],   # 1
+   [-1, 1, MobileNetV2_Block, [16, 2, 2]],   # 2-p2/4
+   [-1, 1, MobileNetV2_Block, [16, 1, 2]],   # 3
+   [-1, 1, MobileNetV2_Block, [32, 2, 2]],   # 4-p3/8
+   [-1, 1, MobileNetV2_Block, [32, 1, 2]],   # 5
+
+   [-1, 1, MobileNetV2_Block, [64, 2, 2]],   # 6-p4/16
+   [-1, 1, MobileNetV2_Block, [64, 1, 2]],   # 7
+   [-1, 1, MobileNetV2_Block, [64, 1, 2]],   # 8
+   [-1, 1, MobileNetV2_Block, [64, 1, 2]],   # 9
+   [-1, 1, MobileNetV2_Block, [128, 2, 2]],  # 10-p5/32
+   [-1, 1, MobileNetV2_Block, [128, 1, 2]],  # 11
+   [-1, 1, MobileNetV2_Block, [128, 1, 2]],  # 12
+
+   [-1, 1, SPPF, [256, 5]],  # 13
+  ]
+
+# YOLOv5 v6.0 head
+head:
+  [[-1, 1, Conv, [128, 1, 1]], # 14
+   [-1, 1, nn.Upsample, [None, 2, 'nearest']],
+   [[-1, 9], 1, Concat, [1]],  # cat backbone P4
+   [-1, 1, C3, [128, False]],  # 17
+
+   [-1, 1, Conv, [64, 1, 1]], # 18
+   [-1, 1, nn.Upsample, [None, 2, 'nearest']],
+   [[-1, 5], 1, Concat, [1]],  # cat backbone P3
+   [-1, 1, C3, [64, False]],  # 20 (P3/8-small)
+
+   [-1, 1, RepVGGBlock, [64, 3, 2]],
+   [[-1, 18], 1, Concat, [1]], # cat head P4
+   [-1, 1, C3, [128, False]],  # 24 (P4/16-medium)
+
+   [-1, 1, RepVGGBlock, [128, 3, 2]],
+   [[-1, 14], 1, Concat, [1]],  # cat head P5
+   [-1, 1, C3, [256, False]],  # 27 (P5/32-large)
+
+   [[21, 24, 27], 1, Detect, [nc, anchors]],  # Detect(P3, P4, P5)
+  ]
