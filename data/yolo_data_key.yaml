@@ -1,0 +1,15 @@
+# train and val data as 1) directory: path/images/, 2) file: path/images.txt, or 3) list: [path1/images/, path2/images/]
+#train: /home/xialuxi/work/dukto/data/CCPD2020/CCPD2020/images/train/  # 16551 images
+#val: /home/xialuxi/work/dukto/data/CCPD2020/CCPD2020/images/val/  # 4952 images
+
+
+train: /media/wqg/3e165c12-9862-4867-b333-fbf93befd928/home/wqg/data/maxvision_data/ADAS/1964/train/images/  # 450 images
+
+val: /media/wqg/3e165c12-9862-4867-b333-fbf93befd928/home/wqg/data/maxvision_data/ADAS/1964/valtest/images/  # 50 images
+
+# number of classes
+nc: 10
+
+# class names
+#names: [ 'plate']
+names: ['people','cyclist','Hcar','Htruck','Hbus','Hother','Bcar','Btruck','Bbus','Bother']  # class names

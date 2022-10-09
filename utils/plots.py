@@ -15,6 +15,8 @@ import numpy as np
 import pandas as pd
 import seaborn as sn
 import torch
+import yaml
+import random
 from PIL import Image, ImageDraw, ImageFont
 
 from utils.general import user_config_dir, is_ascii, is_chinese, xywh2xyxy, xyxy2xywh
@@ -147,6 +149,21 @@ def output_to_target(output):
             targets.append([i, cls, *list(*xyxy2xywh(np.array(box)[None])), conf])
     return np.array(targets)
 
+def output_to_target_key(output):
+    # Convert model output to target format [batch_id, class_id, x, y, w, h, conf]
+    targets = []
+    for i, o in enumerate(output):
+        for oo in o.cpu().numpy():
+            cls = oo[-1]
+            conf = oo[4]
+            box = oo[:4]
+            lank = oo[-9:-1]
+            # print('conf', conf)
+            targets.append([i, cls, *list(*xyxy2xywh(np.array(box)[None])), *list(lank), conf])
+
+        # for *box, conf, cls in o.cpu().numpy():
+        #     targets.append([i, cls, *list(*xyxy2xywh(np.array(box)[None])), conf])
+    return np.array(targets)
 
 def plot_images(images, targets, paths=None, fname='images.jpg', names=None, max_size=1920, max_subplots=16):
     # Plot image grid with labels
@@ -207,6 +224,132 @@ def plot_images(images, targets, paths=None, fname='images.jpg', names=None, max
                     label = f'{cls}' if labels else f'{cls} {conf[j]:.1f}'
                     annotator.box_label(box, label, color=color)
     annotator.im.save(fname)  # save
+
+
+
+def plot_images_key(images, targets, paths=None, fname='images.jpg', names=None, max_size=640, max_subplots=16):
+    # Plot image grid with labels
+
+    if isinstance(images, torch.Tensor):
+        images = images.cpu().float().numpy()
+    if isinstance(targets, torch.Tensor):
+        targets = targets.cpu().numpy()
+
+    # un-normalise
+    if np.max(images[0]) <= 1:
+        images *= 255
+
+    tl = 3  # line thickness
+    tf = max(tl - 1, 1)  # font thickness
+    bs, _, h, w = images.shape  # batch size, _, height, width
+    bs = min(bs, max_subplots)  # limit plot images
+    ns = np.ceil(bs ** 0.5)  # number of subplots (square)
+
+    # Check if we should resize
+    scale_factor = max_size / max(h, w)
+    if scale_factor < 1:
+        h = math.ceil(scale_factor * h)
+        w = math.ceil(scale_factor * w)
+
+    colors = color_list()  # list of colors
+    mosaic = np.full((int(ns * h), int(ns * w), 3), 255, dtype=np.uint8)  # init
+    for i, img in enumerate(images):
+        if i == max_subplots:  # if last batch has fewer images than we expect
+            break
+
+        block_x = int(w * (i // ns))
+        block_y = int(h * (i % ns))
+
+        img = img.transpose(1, 2, 0)
+        if scale_factor < 1:
+            img = cv2.resize(img, (w, h))
+
+        mosaic[block_y:block_y + h, block_x:block_x + w, :] = img
+        if len(targets) > 0:
+            image_targets = targets[targets[:, 0] == i]
+            boxes = xywh2xyxy(image_targets[:, 2:6]).T
+            lanemaks = image_targets[:, 6:14]
+            classes = image_targets[:, 1].astype('int')
+            # labels = image_targets.shape[1] == 6  # labels if no conf column
+            labels = image_targets.shape[1] == 14  # labels if no conf column
+            conf = None if labels else image_targets[:, -1]  # check for confidence presence (label vs pred)
+
+            if boxes.shape[1]:
+                if boxes.max() <= 1.01:  # if normalized with tolerance 0.01
+                    boxes[[0, 2]] *= w  # scale to pixels
+                    boxes[[1, 3]] *= h
+                elif lanemaks.max() <= 1.01:
+                    lanemaks[:, [0, 2, 4, 6]] *= w
+                    lanemaks[:, [1, 3, 5, 7]] *= h
+
+                elif scale_factor < 1:  # absolute coords need scale if image scales
+                    boxes *= scale_factor
+                    lanemaks *= scale_factor
+
+            boxes[[0, 2]] += block_x
+            boxes[[1, 3]] += block_y
+            lanemaks[:, [0, 2, 4, 6]] += block_x
+            lanemaks[:, [1, 3, 5, 7]] += block_y
+
+            for j, box in enumerate(boxes.T):
+                cls = int(classes[j])
+                color = colors[cls % len(colors)]
+                cls = names[cls] if names else cls
+                points = lanemaks[j]
+
+                if labels or conf[j] > 0.25:  # 0.25 conf thresh
+                    label = '%s' % cls if labels else '%s %.1f' % (cls, conf[j])
+                    plot_one_box(box, mosaic, label=label, color=color, line_thickness=tl)
+                    point_label(points,mosaic, color=(255, 0, 0))
+
+        # Draw image filename labels
+        if paths:
+            label = Path(paths[i]).name[:40]  # trim to 40 char
+            t_size = cv2.getTextSize(label, 0, fontScale=tl / 3, thickness=tf)[0]
+            cv2.putText(mosaic, label, (block_x + 5, block_y + t_size[1] + 5), 0, tl / 3, [220, 220, 220], thickness=tf,
+                        lineType=cv2.LINE_AA)
+
+        # Image border
+        cv2.rectangle(mosaic, (block_x, block_y), (block_x + w, block_y + h), (255, 255, 255), thickness=3)
+
+    if fname:
+        r = min(1280. / max(h, w) / ns, 1.0)  # ratio to limit image size
+        mosaic = cv2.resize(mosaic, (int(ns * w * r), int(ns * h * r)), interpolation=cv2.INTER_AREA)
+        # cv2.imwrite(fname, cv2.cvtColor(mosaic, cv2.COLOR_BGR2RGB))  # cv2 save
+        Image.fromarray(mosaic).save(fname)  # PIL save
+    return mosaic
+
+def color_list():
+    # Return first 10 plt colors as (r,g,b) https://stackoverflow.com/questions/51350872/python-from-color-name-to-rgb
+    def hex2rgb(h):
+        return tuple(int(h[1 + i:1 + i + 2], 16) for i in (0, 2, 4))
+
+    return [hex2rgb(h) for h in matplotlib.colors.TABLEAU_COLORS.values()]  # or BASE_ (8), CSS4_ (148), XKCD_ (949)
+
+def plot_one_box(x, im, color=None, label=None, line_thickness=3):
+    # Plots one bounding box on image 'im' using OpenCV
+    assert im.data.contiguous, 'Image not contiguous. Apply np.ascontiguousarray(im) to plot_on_box() input image.'
+    tl = line_thickness or round(0.002 * (im.shape[0] + im.shape[1]) / 2) + 1  # line/font thickness
+    color = color or [random.randint(0, 255) for _ in range(3)]
+    c1, c2 = (int(x[0]), int(x[1])), (int(x[2]), int(x[3]))
+    cv2.rectangle(im, c1, c2, color, thickness=tl, lineType=cv2.LINE_AA)
+    if label:
+        tf = max(tl - 1, 1)  # font thickness
+        t_size = cv2.getTextSize(label, 0, fontScale=tl / 3, thickness=tf)[0]
+        c2 = c1[0] + t_size[0], c1[1] - t_size[1] - 3
+        cv2.rectangle(im, c1, c2, color, -1, cv2.LINE_AA)  # filled
+        cv2.putText(im, label, (c1[0], c1[1] - 2), 0, tl / 3, [225, 255, 255], thickness=tf, lineType=cv2.LINE_AA)
+
+def point_label(point, im, label='', color=(128, 128, 128), txt_color=(255, 255, 255)):
+
+    color = [(128,0,0), (0,128,0), (0,0,128), (0,0,0) ]
+    for i in range(4):
+
+        p = (int(point[2*i]), int(point[2*i+1]))
+        # print(p)
+
+        cv2.circle(im, p, 1, color[i], 2)
+
 
 
 def plot_lr_scheduler(optimizer, scheduler, epochs=300, save_dir=''):
@@ -291,6 +434,63 @@ def plot_val_study(file='', dir='', x=None):  # from utils.plots import *; plot_
     f = save_dir / 'study.png'
     print(f'Saving {f}...')
     plt.savefig(f, dpi=300)
+
+def plot_evolution(yaml_file='data/hyp.finetune.yaml'):  # from utils.plots import *; plot_evolution()
+    # Plot hyperparameter evolution results in evolve.txt
+    with open(yaml_file) as f:
+        hyp = yaml.load(f, Loader=yaml.SafeLoader)
+    x = np.loadtxt('evolve.txt', ndmin=2)
+    f = fitness(x)
+    # weights = (f - f.min()) ** 2  # for weighted results
+    plt.figure(figsize=(10, 12), tight_layout=True)
+    matplotlib.rc('font', **{'size': 8})
+    for i, (k, v) in enumerate(hyp.items()):
+        y = x[:, i + 7]
+        # mu = (y * weights).sum() / weights.sum()  # best weighted result
+        mu = y[f.argmax()]  # best single result
+        plt.subplot(6, 5, i + 1)
+        plt.scatter(y, f, c=hist2d(y, f, 20), cmap='viridis', alpha=.8, edgecolors='none')
+        plt.plot(mu, f.max(), 'k+', markersize=15)
+        plt.title('%s = %.3g' % (k, mu), fontdict={'size': 9})  # limit to 40 characters
+        if i % 5 != 0:
+            plt.yticks([])
+        print('%15s: %.3g' % (k, mu))
+    plt.savefig('evolve.png', dpi=200)
+    print('\nPlot saved as evolve.png')
+
+
+def plot_study_txt(path='', x=None):  # from utils.plots import *; plot_study_txt()
+    # Plot study.txt generated by test.py
+    fig, ax = plt.subplots(2, 4, figsize=(10, 6), tight_layout=True)
+    # ax = ax.ravel()
+
+    fig2, ax2 = plt.subplots(1, 1, figsize=(8, 4), tight_layout=True)
+    # for f in [Path(path) / f'study_coco_{x}.txt' for x in ['yolov5s6', 'yolov5m6', 'yolov5l6', 'yolov5x6']]:
+    for f in sorted(Path(path).glob('study*.txt')):
+        y = np.loadtxt(f, dtype=np.float32, usecols=[0, 1, 2, 3, 7, 8, 9], ndmin=2).T
+        x = np.arange(y.shape[1]) if x is None else np.array(x)
+        s = ['P', 'R', 'mAP@.5', 'mAP@.5:.95', 't_inference (ms/img)', 't_NMS (ms/img)', 't_total (ms/img)']
+        # for i in range(7):
+        #     ax[i].plot(x, y[i], '.-', linewidth=2, markersize=8)
+        #     ax[i].set_title(s[i])
+
+        j = y[3].argmax() + 1
+        ax2.plot(y[6, 1:j], y[3, 1:j] * 1E2, '.-', linewidth=2, markersize=8,
+                 label=f.stem.replace('study_coco_', '').replace('yolo', 'YOLO'))
+
+    ax2.plot(1E3 / np.array([209, 140, 97, 58, 35, 18]), [34.6, 40.5, 43.0, 47.5, 49.7, 51.5],
+             'k.-', linewidth=2, markersize=8, alpha=.25, label='EfficientDet')
+
+    ax2.grid(alpha=0.2)
+    ax2.set_yticks(np.arange(20, 60, 5))
+    ax2.set_xlim(0, 57)
+    ax2.set_ylim(30, 55)
+    ax2.set_xlabel('GPU Speed (ms/img)')
+    ax2.set_ylabel('COCO AP val')
+    ax2.legend(loc='lower right')
+    plt.savefig(str(Path(path).name) + '.png', dpi=300)
+
+
 
 
 def plot_labels(labels, names=(), save_dir=Path(''),num=1):
