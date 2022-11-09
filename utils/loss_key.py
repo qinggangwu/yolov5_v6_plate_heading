@@ -143,7 +143,8 @@ class LandmarksLoss(nn.Module):
     # BCEwithLogitLoss() with reduced missing label effects.
     def __init__(self):
         super(LandmarksLoss, self).__init__()
-        self.loss_fcn = nn.SmoothL1Loss(reduction='sum')
+        # self.loss_fcn = nn.SmoothL1Loss(reduction='sum')
+        self.loss_fcn = WingLoss()
 
     def forward(self, pred, truel, mask):
         loss = self.loss_fcn(pred*mask, truel*mask)

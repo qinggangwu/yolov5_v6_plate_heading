@@ -175,6 +175,7 @@ def run(data,
     loss = torch.zeros(3, device=device)
     # jdict, stats, ap, ap_class = [], [], [], []
     jdictlist, statslist, aplist, ap_classlsit = [], [], [], []
+    mpL, mrL, map50L, mapL = [], [], [], []
 
 
     for headi,dataloader_head in enumerate(dataloader):
@@ -195,6 +196,7 @@ def run(data,
                 out, train_out = outputs[:2]
                 # Compute loss
                 if compute_loss:
+                    # loss += compute_loss[headi]([x.float() for x in train_out], targets)[1]  # box, obj, cls
                     loss += compute_loss([x.float() for x in train_out], targets)[1]  # box, obj, cls
             else:
                 out = outputs[0]
@@ -334,7 +336,12 @@ def run(data,
         maps = np.zeros(ncList[headi]) + map
         for i, c in enumerate(ap_class):
             maps[c] = ap[i]
-    return (mp, mr, map50, map, *(loss.cpu() / len(dataloader)).tolist()), maps, t
+        mpL.append(mp)
+        mrL.append(mr)
+        map50L.append(map50)
+        mapL.append(map)
+    # return (mp, mr, map50, map, *(loss.cpu() / len(dataloader)).tolist()), maps, t
+    return (sum(mpL)/len(mpL), sum(mrL)/len(mrL), sum(map50L)/len(map50L), sum(mapL)/len(mapL), *(loss.cpu() / len(dataloader)).tolist()), maps, t
 
 
 def parse_opt():

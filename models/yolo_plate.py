@@ -196,7 +196,7 @@ class Model(nn.Module):
 
         for m in self.model[self.headi_forward_list[0]+8:self.headi_forward_list[1]]:    # 执行head
             if m.f != -1:  # if not from previous layer
-                x = y[m.f] if isinstance(m.f, int) else [x if j == -1 else y[j - 15*self.headi_one] for j in m.f]  # from earlier layers
+                x = y[m.f] if isinstance(m.f, int) else [x if j == -1 else y[j - 12*self.headi_one] for j in m.f]  # from earlier layers
             if profile:
                 self._profile_one_layer(m, x, dt)
 
@@ -395,7 +395,7 @@ def parse_model(d, ch):  # model_dict, input_channels(3)
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
     # parser.add_argument('--cfg', type=str, default='yolov5s.yaml', help='model.yaml')
-    parser.add_argument('--cfg', type=str, default='yolov5s_plate.yaml', help='model.yaml')
+    parser.add_argument('--cfg', type=str, default='yolov5s_plate_2anchor.yaml', help='model.yaml')
     parser.add_argument('--device', default='', help='cuda device, i.e. 0 or 0,1,2,3 or cpu')
     parser.add_argument('--profile', action='store_true', help='profile model speed')
     opt = parser.parse_args()

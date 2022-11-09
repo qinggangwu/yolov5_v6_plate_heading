@@ -272,8 +272,7 @@ def train(hyp,  # path/to/hyp.yaml or hyp dictionary
 
     # Start training
     t0 = time.time()
-    nw = max(round(hyp['warmup_epochs'] * nbList[0]), 1000)  # number of warmup iterations, max(3 epochs, 1k iterations)
-    # nw = min(nw, (epochs - start_epoch) / 2 * nb)  # limit warmup to < 1/2 of training
+
     last_opt_step = -1
     maps = np.zeros(nc)  # mAP per class
     results = (0, 0, 0, 0, 0, 0, 0)  # P, R, mAP@.5, mAP@.5-.95, val_loss(box, obj, cls)
@@ -281,7 +280,8 @@ def train(hyp,  # path/to/hyp.yaml or hyp dictionary
     scaler = amp.GradScaler(enabled=cuda)
     stopper = EarlyStopping(patience=opt.patience)
     if loss_fn is None:
-        compute_loss = ComputeLoss(model)  # init loss class
+        compute_loss = ComputeLoss(model)
+        # compute_lossL = [ComputeLoss(model, headi=ii) for ii in range(head_num)]  # init loss class
     else:
         compute_loss = loss_fn(model)
     #compute_loss = ComputeLoss(model)  # init loss class
@@ -321,54 +321,61 @@ def train(hyp,  # path/to/hyp.yaml or hyp dictionary
             LOGGER.info(('\n' + '%10s' * 7) % ('Epoch', 'gpu_mem', 'box', 'obj', 'cls', 'labels', 'img_size'))
 
 
-        maxidx,maxnum = nbList.index(max(nbList)) , max(nbList)
-
+        # from xiluxi
+        # --------------******************************--------------------------
+        maxidx, maxnum = nbList.index(max(nbList)), max(nbList)
         train_loader = train_loaderList[maxidx]
+
         if RANK != -1:
-            train_loader.sampler.set_epoch(epoch)
+            for loader_ in train_loaderList:
+                loader_.sampler.set_epoch(epoch)
 
         pbar = enumerate(train_loader)
+
         if RANK in [-1, 0]:
-            pbar = tqdm(pbar, total=maxnum)  # progress bar
+            pbar = tqdm(range(maxnum),total=maxnum)  # progress bar
         optimizer.zero_grad()
 
-        pbarL = [enumerate(train_loader) for train_loader in train_loaderList]
-        if RANK in [-1, 0]:
-            pbarL = [tqdm(pbar, total=nbList[ii]) for ii, pbar in enumerate(pbarL)]  # progress bar
+        iter_list = [iter(train_loader) for train_loader in train_loaderList]
 
-
-        for i, (imgs, targets, paths, _) in pbar:  # batch -------------------------------------------------------------
-            lossd = 0
+        for i in pbar:
+            if type(i) != int:
+                i = i[0]
 
             imgList = []
-            for headi in range(head_num):
-                if i % nbList[headi] ==0 and i >0:
-                    ppp = enumerate(train_loaderList[headi])
-                    print()
-                    pbarL[headi] = tqdm(ppp, total=nbList[headi])  # for ii, pbar in enumerate(pbarL)]
-                    for i0, (imgs0, targets0, paths0, _) in pbarL[headi]:
-                        imgList.append((imgs0, targets0, paths0, _))
-                        break
+            for k,iter_ in enumerate(iter_list):
+                re = next(iter_,None)
+                if (re is None):
+                    if RANK != -1:
+                        train_loaderList[k].sampler.set_epoch(epoch)
+                    iter_list[k] = iter(train_loaderList[k])
+                    imgList.append(next(iter_list[k] , None))
                 else:
-                    for i0, (imgs0, targets0, paths0, _) in pbarL[headi]:
-                        imgList.append((imgs0, targets0, paths0, _))
-                        break
+                    imgList.append(re)
+# -------------******************************--------------------------
+
+            lossd = 0
+            lcls, lbox, lobj = torch.zeros(1, device=device), torch.zeros(1, device=device), torch.zeros(1,device=device)
+            loss_items0 = torch.cat((lbox, lobj, lcls)).detach()
+
+            nw = max(round(hyp['warmup_epochs'] * nbList[maxidx]),1000)  # number of warmup iterations, max(3 epochs, 1k iterations)
+            # nw = min(nw, (epochs - start_epoch) / 2 * nb)  # limit warmup to < 1/2 of training
+            ni = i + nbList[maxidx] * epoch  # number integrated batches (since train start)
+            # Warmup
+            if ni <= nw:
+                xi = [0, nw]  # x interp
+                # compute_loss.gr = np.interp(ni, xi, [0.0, 1.0])  # iou loss ratio (obj_loss = 1.0 or iou)
+                accumulate = max(1, np.interp(ni, xi, [1, nbs / batch_size]).round())
+                for j, x in enumerate(optimizer.param_groups):
+                    # bias lr falls from 0.1 to lr0, all other lrs rise from 0.0 to lr0
+                    x['lr'] = np.interp(ni, xi,
+                                        [hyp['warmup_bias_lr'] if j == 2 else 0.0, x['initial_lr'] * lf(epoch)])
+                    if 'momentum' in x:
+                        x['momentum'] = np.interp(ni, xi, [hyp['warmup_momentum'], hyp['momentum']])
 
 
             for headi ,(imgs, targets, paths, _) in enumerate(imgList):
-                ni = i + nbList[headi] * epoch  # number integrated batches (since train start)
                 imgs = imgs.to(device, non_blocking=True).float() / 255.0  # uint8 to float32, 0-255 to 0.0-1.0
-
-                # Warmup
-                if ni <= nw:
-                    xi = [0, nw]  # x interp
-                    # compute_loss.gr = np.interp(ni, xi, [0.0, 1.0])  # iou loss ratio (obj_loss = 1.0 or iou)
-                    accumulate = max(1, np.interp(ni, xi, [1, nbs / batch_size]).round())
-                    for j, x in enumerate(optimizer.param_groups):
-                        # bias lr falls from 0.1 to lr0, all other lrs rise from 0.0 to lr0
-                        x['lr'] = np.interp(ni, xi, [hyp['warmup_bias_lr'] if j == 2 else 0.0, x['initial_lr'] * lf(epoch)])
-                        if 'momentum' in x:
-                            x['momentum'] = np.interp(ni, xi, [hyp['warmup_momentum'], hyp['momentum']])
 
                 # Multi-scale
                 if opt.multi_scale:
@@ -382,15 +389,18 @@ def train(hyp,  # path/to/hyp.yaml or hyp dictionary
                 with amp.autocast(enabled=cuda):
                     pred = model(imgs, headi = headi)  # forward
                     loss, loss_items = compute_loss(pred, targets.to(device))  # loss scaled by batch_size
+                    # loss, loss_items = compute_lossL[headi](pred, targets.to(device))  # loss scaled by batch_size
                     if RANK != -1:
                         loss *= WORLD_SIZE  # gradient averaged between devices in DDP mode
                     if opt.quad:
                         loss *= 4.
 
                     lossd += loss
+                    loss_items0 +=loss_items
 
+            loss_items = loss_items0/head_num
             # Backward
-            scaler.scale(lossd).backward()
+            scaler.scale(lossd/head_num).backward()
 
             # Optimize
             if ni - last_opt_step >= accumulate:
@@ -506,7 +516,7 @@ def train(hyp,  # path/to/hyp.yaml or hyp dictionary
 def parse_opt(known=False):
     parser = argparse.ArgumentParser()
     parser.add_argument('--weights', type=str, default=ROOT / 'weights/yolov5s.pt', help='initial weights path')
-    parser.add_argument('--cfg', type=str, default=ROOT / 'models/yolov5s_plate.yaml', help='model.yaml path')
+    parser.add_argument('--cfg', type=str, default=ROOT / 'models/yolov5s_plate_2anchor.yaml', help='model.yaml path')
     parser.add_argument('--data', type=str, default=ROOT / 'data/mydata.yaml', help='dataset.yaml path')
     parser.add_argument('--hyp', type=str, default=ROOT / 'data/hyps/hyp.scratch.yaml', help='hyperparameters path')
     parser.add_argument('--epochs', type=int, default=5)

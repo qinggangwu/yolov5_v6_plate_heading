@@ -9,7 +9,7 @@
 headnum : 3
 
 # Train/val/test sets as 1) dir: path/to/imgs, 2) file: path/to/imgs.txt, or 3) list: [path/to/imgs1, path/to/imgs2, ..]
-path: /media/wqg/3e165c12-9862-4867-b333-fbf93befd928/home/wqg/data/maxvision_data/det
+path: ../data/det
 train1: # train images (relative to 'path')  16551 images
   - train1/images
 val1: # val images (relative to 'path')  4952 images
@@ -22,7 +22,6 @@ nc1: 2  # number of classes
 names1: ['carplate', 'flag']  # class names
 
 #
-#path2: /media/wqg/3e165c12-9862-4867-b333-fbf93befd928/home/wqg/data/maxvision_data/det
 train2: # train images (relative to 'path')  16551 images
   - train2/images
 val2: # val images (relative to 'path')  4952 images
@@ -34,7 +33,6 @@ nc2: 3  # number of classes
 names2: ['carplate1', 'flag1', 'flag12']  # class names   #,'carplate1', 'flag1'
 
 
-#path3: /media/wqg/3e165c12-9862-4867-b333-fbf93befd928/home/wqg/data/maxvision_data/dets
 train3: # train images (relative to 'path')  16551 images
   - train3/images
 val3: # val images (relative to 'path')  4952 images

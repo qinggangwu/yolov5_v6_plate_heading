@@ -21,9 +21,9 @@ def time_synchronized():
     
 def get_model(weights):
     #fuse conv_bn and repvgg
-    model = torch.load(weights, map_location=device)['model'].float().fuse_model().eval()
+    # model = torch.load(weights, map_location=device)['model'].float().fuse_model().eval()
     #only fuse conv_bn
-    #model = torch.load(weights, map_location=device)['model'].float().fuse().eval()
+    model = torch.load(weights, map_location=device)['model'].float().fuse().eval()
     return model
 
 def process_img(orgimg):
@@ -54,7 +54,7 @@ def show_results(img, xywh, class_num, conf=0.4):
     return img
 
 
-def detect(model, image, conf_thres, iou_thres):
+def detect(model, image, conf_thres, iou_thres,headi = 5):
 
     #img
     #h, w, c = image.shape
@@ -67,7 +67,7 @@ def detect(model, image, conf_thres, iou_thres):
 
     img = process_img(image)
     #print(img.shape)
-    pred = model(img)[0]
+    pred = model(img,headi = headi)[0]
     pred = non_max_suppression(pred, conf_thres, iou_thres)
     for i, det in enumerate(pred):  # detections per image
         gn = torch.tensor(image.shape)[[1, 0, 1, 0]]  # normalization gain whwh
@@ -113,11 +113,11 @@ def detect_video(model, path, save_path = None):
     cv2.destroyAllWindows()
     
     
-def detect_image(model, path, save_path = None):
+def detect_image(model, path,haedi = 5,  save_path = None):
     conf_thres, iou_thres = 0.4, 0.4
     cv2.namedWindow("image",cv2.WINDOW_NORMAL)
     frame = cv2.imread(path)
-    frame = detect(model, frame, conf_thres, iou_thres)
+    frame = detect(model, frame, conf_thres, iou_thres, haedi)
     if save_path is not None:
         cv2.imwrite(save_path, frame)
     cv2.imshow('image', frame)
@@ -126,6 +126,17 @@ def detect_image(model, path, save_path = None):
 
 
 if __name__ == '__main__':
+
+    """
+    headi = 0    老挝车牌
+    headi = 1    蒙古
+    headi = 2    缅甸车牌 
+    headi = 3    中东车牌     
+    headi = 4    朝鲜　，越南，俄罗斯　巴基斯坦，哈萨克斯坦，非洲（科特迪瓦，尼日利亚）
+    headi = 5    大陆车牌
+    
+    """
+
     #detect_test()
     weights = './runs/train/exp48/weights/last.pt'
     model = get_model(weights)
@@ -135,6 +146,6 @@ if __name__ == '__main__':
     #detect_video(model, video_path, save_path)
 
     image_path = './43eb0e68965711513412c4b051051770.JPG'
-    detect_image(model, image_path)
+    detect_image(model, image_path,haedi =2)
 
 

@@ -140,7 +140,7 @@ class VFocalLoss(nn.Module):
 
 class ComputeLoss:
     # Compute losses
-    def __init__(self, model, autobalance=False, use_alpha_iou=False ,use_vfloss=False):
+    def __init__(self, model,headi = -1, autobalance=False, use_alpha_iou=False ,use_vfloss=False):
         self.sort_obj_iou = False
         device = next(model.parameters()).device  # get model device
         h = model.hyp  # hyperparameters
@@ -161,6 +161,10 @@ class ComputeLoss:
         g = h['fl_gamma']  # focal loss gamma
         if g > 0 and self.use_vfloss == False:
             BCEcls, BCEobj = FocalLoss(BCEcls, g), FocalLoss(BCEobj, g)
+
+
+        # det_num = -1 if headi == -1 else (9 + 12*(headi+1))
+        # det = model.module.model[det_num] if is_parallel(model) else model.model[det_num]  # Detect() module
 
         det = model.module.model[-1] if is_parallel(model) else model.model[-1]  # Detect() module
         self.balance = {3: [4.0, 1.0, 0.4]}.get(det.nl, [4.0, 1.0, 0.25, 0.06, .02])  # P3-P7
@@ -209,7 +213,7 @@ class ComputeLoss:
                         t_cls = torch.zeros_like(pi[..., 5:], device=device)  # target cls
                         cls_iou = tobj.detach().unsqueeze(4).repeat(1,1,1,1,t.shape[1])
                         t_cls[b, a, gj, gi] = t
-                        t_cls *=  cls_iou
+                        t_cls *= cls_iou
                         lcls += self.BCEcls(pi[..., 5:], t_cls)
                         #only for pos
                         #cls_iou = score_iou.unsqueeze(1).repeat(1,t.shape[1])
